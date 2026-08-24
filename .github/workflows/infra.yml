@@ -17,11 +17,13 @@ on:
   pull_request:
     paths:
       - "infra/**"
+      - "web_app/**"
       - ".github/workflows/infra.yml"
   push:
     branches: [main]
     paths:
       - "infra/**"
+      - "web_app/**"
       - ".github/workflows/infra.yml"
   workflow_dispatch:
 
@@ -44,7 +46,12 @@ jobs:
         run: pip install cfn-lint==1.55.1
 
       - name: cfn-lint
-        run: cfn-lint infra/core.yaml
+        run: cfn-lint infra/core.yaml infra/web.yaml
+
+      # The web app is deliberately dependency-free (stdlib + the boto3 the
+      # Lambda runtime ships), so a syntax check is the whole build.
+      - name: compile web_app
+        run: python -m compileall -q web_app
 
   deploy:
     name: deploy arenabench-core
@@ -99,3 +106,31 @@ jobs:
             --parameter-overrides \
               "VpcId=${{ steps.params.outputs.vpc_id }}" \
               "SubnetIds=${{ steps.params.outputs.subnet_ids }}"
+
+      # ── The web plane (infra/web.yaml) ──────────────────────────────────
+      # Same first-deploy caveat as core: HostedZoneId has no default, so
+      # the stack must exist (created by the manual bootstrap in
+      # infra/README.md) before CI can read it back and redeploy.
+      - name: package web_app
+        id: web
+        run: |
+          set -euo pipefail
+          cd web_app && zip -q -X -r ../web_app.zip . && cd ..
+          key="cache/web/${GITHUB_SHA}.zip"
+          aws s3 cp web_app.zip "s3://arenabench-artifacts-578673726240/${key}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          zone=$(aws cloudformation describe-stacks --stack-name arenabench-web \
+            --query "Stacks[0].Parameters[?ParameterKey=='HostedZoneId'].ParameterValue" --output text)
+          test -n "$zone"
+          echo "zone=$zone" >> "$GITHUB_OUTPUT"
+
+      - name: deploy web
+        run: |
+          aws cloudformation deploy \
+            --template-file infra/web.yaml \
+            --stack-name arenabench-web \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "HostedZoneId=${{ steps.web.outputs.zone }}" \
+              "CodeS3Key=${{ steps.web.outputs.key }}"

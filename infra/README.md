@@ -4,9 +4,11 @@
 
 Scale-to-zero AWS infrastructure for running ArenaBench matches as short,
 serious bursts — 12 agents at 12-task concurrency if asked — while billing
-nothing when idle. One CloudFormation template (`core.yaml`) is the whole
-control plane; the web app lives on Vercel (arenabench.org) and reaches AWS
-through an OIDC-assumed role, never long-lived keys.
+nothing when idle. Two CloudFormation templates: `core.yaml` is the
+execution plane (Batch, CodeBuild, S3, DynamoDB, the CI deploy role) and
+`web.yaml` is the arenabench.org control plane (Lambda + API Gateway +
+Route 53), which only reads what core owns. Everything is 100% AWS — the
+earlier Vercel deployment is retired.
 
 **Standalone by design.** ArenaBench is its own repository, ejected from the
 Stella monorepo. Nothing here assumes that monorepo: the system under test
@@ -20,13 +22,13 @@ seat in a match TOML.
 ## Architecture
 
 ```
-arenabench.org (Vercel, Next.js)          AWS account 578673726240, us-east-1
+arenabench.org (Route 53 → API GW)        AWS account 578673726240, us-east-1
 ┌─────────────────────────────┐
-│ Auth.js magic-link login    │   OIDC    ┌──────────────────────────────────┐
-│ (Resend; allowlist:         ├──────────►│ role arenabench-vercel-web       │
-│  mac@macanderson.com)       │           └───────┬──────────────────────────┘
+│ Lambda arenabench-web       │           ┌──────────────────────────────────┐
+│ magic-link login over SES;  ├──────────►│ role arenabench-web              │
+│ allowlist = AllowedEmails   │           └───────┬──────────────────────────┘
 └─────────────────────────────┘                   │ SubmitJob / StartBuild /
-                                                  │ DynamoDB / S3 / logs
+                                                  │ DynamoDB / S3 (read)
         ┌─────────────────────────────────────────┼─────────────────────────┐
         │                                         ▼                         │
         │  CodeBuild arenabench-sut-build   AWS Batch queues                │
@@ -75,6 +77,21 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides VpcId=<default-vpc> \
       'SubnetIds=<subnet-1>,<subnet-2>,...'
+```
+
+The web stack has the same shape of bootstrap (its `HostedZoneId` has no
+default, and stack creation waits on ACM's DNS validation, so the domain's
+nameservers must already delegate to the Route 53 zone):
+
+```bash
+cd web_app && zip -X -r ../web_app.zip . && cd ..
+aws s3 cp web_app.zip s3://arenabench-artifacts-<account>/cache/web/bootstrap.zip
+aws cloudformation deploy \
+  --template-file infra/web.yaml \
+  --stack-name arenabench-web \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides HostedZoneId=<zone-id> \
+      CodeS3Key=cache/web/bootstrap.zip
 ```
 
 If the account already holds a `token.actions.githubusercontent.com` OIDC
@@ -178,17 +195,28 @@ at whatever capacity the quota allows.
 
 ## Web plane: arenabench.org
 
-The Next.js app (evolving `../ui/`) deploys to Vercel with arenabench.org
-attached; server routes assume `arenabench-vercel-web` via Vercel's OIDC
-federation (`AWS_ROLE_ARN` env var — no AWS keys in Vercel). The trust
-policy accepts the `arena` and `arenabench` project slugs in team `oxagen`.
+`web.yaml` + `../web_app/app.py`: a single dependency-free Python Lambda
+behind an HTTP API, with arenabench.org and www bound through ACM +
+Route 53. It renders the dashboard (built binary refs, recent runner jobs)
+and carries two actions (rebuild the SUT from a ref, submit a smoke trial).
+The retired Vercel/Next.js app this replaces lived in `web/` until the
+ejection.
 
-Auth is built like a real SaaS but gated to one user while testing:
-Auth.js v5 with the Resend email provider (passwordless magic links) and a
-database session adapter; sign-in is refused unless the address appears in
-`ALLOWED_EMAILS` (currently `mac@macanderson.com`). Adding a teammate later
-is an env change; adding OAuth providers later is additive, not a rework.
-Every page and API route sits behind the session middleware.
+Auth is **magic-link only** — no passwords, no signup. `POST /login` mails a
+15-minute single-purpose link over SES to addresses on the allowlist; the
+link sets a 30-day HMAC session cookie. The allowlist is the stack's
+`AllowedEmails` parameter (comma-separated, case-insensitive) — edit the
+parameter and redeploy to admit or remove an operator; removal bites on the
+address's next request because every request re-checks it. The signing
+secret is the SSM SecureString `/arenabench/web/auth-secret`; rotating it
+signs everyone out at once. If the secret is unreadable the app serves 503
+to everyone — it fails closed, unlike the `ACCESS_KEY` cookie gate the old
+app shipped.
+
+SES notes: while the account is in the SES sandbox, both the `MailFrom`
+identity and every recipient must be verified identities. The
+`arenabench.org` domain identity verifies via the DKIM CNAMEs in the hosted
+zone; production access lifts the recipient restriction.
 
 ## Self-tuning roadmap (the Opus 5 target)
 

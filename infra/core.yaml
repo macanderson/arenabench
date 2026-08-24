@@ -2,9 +2,10 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   ArenaBench core infrastructure: scale-to-zero benchmark compute (AWS Batch),
   SUT binary builds from any git ref (CodeBuild), artifact/trace storage (S3),
-  run metadata (DynamoDB), and the OIDC role the Vercel web app assumes.
+  run metadata (DynamoDB), and the GitHub OIDC deploy role CI assumes.
   Designed for ArenaBench as a standalone repository: the system under test is
-  always fetched by git URL + ref, never by local path.
+  always fetched by git URL + ref, never by local path. The web control plane
+  is its own stack (infra/web.yaml), which only reads what this one owns.
 
 Parameters:
   VpcId:
@@ -33,13 +34,6 @@ Parameters:
       Path of the ArenaBench package inside InfraGitUrl's repo. "." now that
       ArenaBench is its own repository; a fork that vendors ArenaBench into
       a subdirectory sets this to that subdirectory.
-  VercelTeamSlug:
-    Type: String
-    Default: oxagen
-  VercelThumbprint:
-    Type: String
-    Default: 91d89f33169baa11a2e810804f8d25f5639aa440
-    Description: SHA-1 thumbprint of oidc.vercel.com's TLS certificate.
   CreateGitHubOidcProvider:
     Type: String
     Default: "true"
@@ -664,115 +658,10 @@ Resources:
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: trial
 
-  # ----------------------------------------------------------- vercel oidc
-  VercelOidcProvider:
-    Type: AWS::IAM::OIDCProvider
-    Properties:
-      Url: !Sub https://oidc.vercel.com/${VercelTeamSlug}
-      ClientIdList:
-        - !Sub https://vercel.com/${VercelTeamSlug}
-      ThumbprintList:
-        - !Ref VercelThumbprint
-
-  VercelWebRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: arenabench-vercel-web
-      # Rendered as a Sub'd JSON string because the condition keys embed the
-      # team slug, and CloudFormation forbids intrinsics in mapping keys.
-      AssumeRolePolicyDocument: !Sub |
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": { "Federated": "${VercelOidcProvider.Arn}" },
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "StringEquals": {
-                  "oidc.vercel.com/${VercelTeamSlug}:aud": "https://vercel.com/${VercelTeamSlug}"
-                },
-                "StringLike": {
-                  "oidc.vercel.com/${VercelTeamSlug}:sub": [
-                    "owner:${VercelTeamSlug}:project:arena:*",
-                    "owner:${VercelTeamSlug}:project:arenabench:*"
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      Policies:
-        - PolicyName: arenabench-vercel-web
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: batch:SubmitJob
-                Resource:
-                  - !Ref MeasureQueue
-                  - !Ref BurstQueue
-                  - !Ref TuneQueue
-                  - !Ref TrialJobDefinition
-              - Effect: Allow
-                Action:
-                  - batch:DescribeJobs
-                  - batch:ListJobs
-                  - batch:TerminateJob
-                  - batch:DescribeJobQueues
-                  - batch:DescribeComputeEnvironments
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - codebuild:StartBuild
-                  - codebuild:StopBuild
-                  - codebuild:BatchGetBuilds
-                Resource:
-                  - !GetAtt SutBuildProject.Arn
-                  - !GetAtt RunnerImageProject.Arn
-              - Effect: Allow
-                Action: s3:ListBucket
-                Resource: !GetAtt ArtifactsBucket.Arn
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                Resource: !Sub ${ArtifactsBucket.Arn}/*
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Query
-                  - dynamodb:BatchWriteItem
-                Resource:
-                  - !GetAtt RunsTable.Arn
-                  - !Sub ${RunsTable.Arn}/index/*
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                  - ssm:GetParametersByPath
-                  - ssm:PutParameter
-                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/arenabench/*
-              - Effect: Allow
-                Action:
-                  - logs:GetLogEvents
-                  - logs:FilterLogEvents
-                Resource:
-                  - !Sub ${BatchLogGroup.Arn}:*
-                  - !Sub ${BuildLogGroup.Arn}:*
-              # Magic-link login mail. arenabench.org is the sending
-              # identity; the wildcard also covers the recipient identities
-              # SES requires while the account is in the sandbox.
-              - Effect: Allow
-                Action:
-                  - ses:SendEmail
-                  - ses:SendRawEmail
-                Resource:
-                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/arenabench.org
-                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+  # The Vercel OIDC provider and arenabench-vercel-web role sat here
+  # until the web plane moved to AWS (infra/web.yaml): the Vercel
+  # deployment is retired per the SaaS spec §9.4, and stella#2254's
+  # SecureString question is answered by this deletion.
 
   # ----------------------------------------------------------- github oidc
   # CI deploys of this very stack: .github/workflows/infra.yml assumes
@@ -823,10 +712,13 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # The stack itself.
+              # This stack, and the web-plane stack the same workflow
+              # deploys (infra/web.yaml).
               - Effect: Allow
                 Action: cloudformation:*
-                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/arenabench-core/*
+                Resource:
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/arenabench-core/*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/arenabench-web/*
               - Effect: Allow
                 Action: cloudformation:ValidateTemplate
                 Resource: "*" # ValidateTemplate takes no resource ARN.
@@ -879,8 +771,9 @@ Resources:
                   - iam:TagInstanceProfile
                   - iam:UntagInstanceProfile
                 Resource: !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/arenabench-*
-              # Both providers this template manages: Vercel's (path embeds
-              # the team slug, hence the wildcard) and GitHub's.
+              # GitHub's provider, which this template manages — plus the
+              # retired Vercel provider's path, kept only so a CI deploy can
+              # finish deleting it from an account that still holds one.
               - Effect: Allow
                 Action:
                   - iam:AddClientIDToOpenIDConnectProvider
@@ -898,10 +791,75 @@ Resources:
               # Bucket-level only (no /*): the deploy role configures the
               # bucket (encryption, lifecycle, public-access block — a long
               # and churning action list, hence s3:*) but is deliberately
-              # not granted object read/write.
+              # not granted object read/write — except the one prefix the
+              # web deploy writes its Lambda zip to.
               - Effect: Allow
                 Action: s3:*
                 Resource: !Sub arn:aws:s3:::arenabench-artifacts-${AWS::AccountId}
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub arn:aws:s3:::arenabench-artifacts-${AWS::AccountId}/cache/web/*
+              # The web-plane stack's own resource families (infra/web.yaml):
+              # one Lambda, an HTTP API with two custom domains, a
+              # DNS-validated certificate, and alias records in the
+              # arenabench.org hosted zone. apigateway's IAM surface is
+              # path-shaped, hence the /apis* + /domainnames* pair; ACM
+              # tickets carry no name until created, hence "*" bounded by
+              # the action list (no export of private keys exists in ACM).
+              - Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:CreateFunction
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetPolicy
+                  - lambda:ListTags
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:arenabench-*
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/arenabench-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - apigateway:GET
+                  - apigateway:POST
+                  - apigateway:PUT
+                  - apigateway:PATCH
+                  - apigateway:DELETE
+                Resource:
+                  - !Sub arn:aws:apigateway:${AWS::Region}::/apis*
+                  - !Sub arn:aws:apigateway:${AWS::Region}::/domainnames*
+                  - !Sub arn:aws:apigateway:${AWS::Region}::/tags*
+              - Effect: Allow
+                Action:
+                  - acm:AddTagsToCertificate
+                  - acm:DeleteCertificate
+                  - acm:DescribeCertificate
+                  - acm:ListTagsForCertificate
+                  - acm:RemoveTagsFromCertificate
+                  - acm:RequestCertificate
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                  - route53:GetHostedZone
+                  - route53:ListResourceRecordSets
+                Resource: arn:aws:route53:::hostedzone/*
+              - Effect: Allow
+                Action:
+                  - route53:GetChange
+                  - route53:ListHostedZones
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - dynamodb:CreateTable
@@ -1028,9 +986,6 @@ Outputs:
     Value: !Ref SutBuildProject
   RunnerImageProjectName:
     Value: !Ref RunnerImageProject
-  VercelWebRoleArn:
-    Description: Role the Vercel app assumes via OIDC (AWS_ROLE_ARN env var).
-    Value: !GetAtt VercelWebRole.Arn
   GitHubDeployRoleArn:
     Description: >-
       Role .github/workflows/infra.yml assumes via GitHub OIDC to deploy

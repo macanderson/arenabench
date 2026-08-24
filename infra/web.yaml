@@ -1,0 +1,304 @@
+# The arenabench.org web control plane — Lambda + API Gateway + Route 53.
+#
+# A separate stack from core.yaml on purpose: the execution plane (Batch,
+# CodeBuild, the artifacts bucket) and the web plane change on different
+# cadences, and a web deploy must not be able to replace a compute
+# environment. This stack only READS what core.yaml provisions (by the
+# names core.yaml deliberately keeps stable: the artifacts bucket, the
+# `arenabench` table, the `arenabench-measure` queue, the `arenabench-trial`
+# job definition, the `arenabench-sut-build` project).
+#
+# It replaces the Vercel deployment of the retired `web/` Next.js app
+# (SaaS spec §9.4: the control plane is 100% AWS). DNS for the domain lives
+# in the Route 53 hosted zone this stack is pointed at; TLS is ACM with DNS
+# validation into that same zone, so certificate issuance and renewal need
+# no human.
+#
+# Deploys: .github/workflows/infra.yml uploads web_app/ as a zip to the
+# artifacts bucket and passes its key as CodeS3Key. First deploy is manual
+# (infra/README.md), like core.yaml's.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  arenabench.org control plane: magic-link-gated dashboard (Lambda + HTTP
+  API + ACM + Route 53). Reads the execution plane arenabench-core owns.
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: arenabench.org
+    Description: Apex domain the control plane answers on (plus www).
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: >-
+      Route 53 hosted zone for DomainName. Certificate validation records
+      and the alias records are written here.
+  AllowedEmails:
+    Type: String
+    Default: macanderson.mail@gmail.com
+    Description: >-
+      Comma-separated, case-insensitive list of addresses allowed to sign
+      in. THE allowlist — edit this parameter and redeploy to admit or
+      remove an operator. Removal takes effect at the address's next
+      request, not at cookie expiry (the app re-checks on every request).
+  MailFrom:
+    Type: String
+    Default: macanderson.mail@gmail.com
+    Description: >-
+      SES-verified identity the magic links are sent from. While the SES
+      account is in the sandbox this must be a verified address and every
+      AllowedEmails recipient must be verified too; once production access
+      is granted, switch to login@arenabench.org (the domain identity).
+  ArtifactsBucket:
+    Type: String
+    Default: ""
+    Description: >-
+      Artifacts bucket name; empty derives arenabench-artifacts-<account>,
+      matching core.yaml.
+  TableName:
+    Type: String
+    Default: arenabench
+  CodeS3Bucket:
+    Type: String
+    Default: ""
+    Description: Bucket holding the Lambda zip; empty = the artifacts bucket.
+  CodeS3Key:
+    Type: String
+    Description: >-
+      Key of the web_app zip (e.g. cache/web/<sha>.zip — under cache/ so
+      stale uploads age out; Lambda keeps its own copy once deployed).
+  AuthSecretParam:
+    Type: String
+    Default: /arenabench/web/auth-secret
+    Description: >-
+      SSM SecureString holding the token-signing secret. Rotating it signs
+      every session and in-flight link out at once.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+Conditions:
+  DeriveBucket: !Equals [!Ref ArtifactsBucket, ""]
+  DeriveCodeBucket: !Equals [!Ref CodeS3Bucket, ""]
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      SubjectAlternativeNames:
+        - !Sub "www.${DomainName}"
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Sub "www.${DomainName}"
+          HostedZoneId: !Ref HostedZoneId
+
+  WebLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/arenabench-web
+      RetentionInDays: !Ref LogRetentionDays
+
+  WebRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: arenabench-web
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: control-plane
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Logs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt WebLogGroup.Arn
+              - Sid: ReadArtifacts
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${Bucket}"
+                    - Bucket: !If
+                        - DeriveBucket
+                        - !Sub "arenabench-artifacts-${AWS::AccountId}"
+                        - !Ref ArtifactsBucket
+                  - !Sub
+                    - "arn:aws:s3:::${Bucket}/*"
+                    - Bucket: !If
+                        - DeriveBucket
+                        - !Sub "arenabench-artifacts-${AWS::AccountId}"
+                        - !Ref ArtifactsBucket
+              - Sid: ReadJobs
+                Effect: Allow
+                Action: dynamodb:Query
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/*"
+              - Sid: SubmitSmoke
+                Effect: Allow
+                Action: batch:SubmitJob
+                Resource:
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-queue/arenabench-measure"
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/arenabench-trial*"
+              - Sid: StartSutBuild
+                Effect: Allow
+                Action: codebuild:StartBuild
+                Resource: !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/arenabench-sut-build"
+              - Sid: SendMagicLinks
+                Effect: Allow
+                Action:
+                  - ses:SendEmail
+                Resource: !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
+              - Sid: ReadAuthSecret
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AuthSecretParam}"
+              # The default SSM key. ViaService keeps this from decrypting
+              # anything except through Parameter Store.
+              - Sid: DecryptAuthSecret
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+
+  WebFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: WebLogGroup
+    Properties:
+      FunctionName: arenabench-web
+      Runtime: python3.13
+      Handler: app.handler
+      MemorySize: 256
+      Timeout: 15
+      Role: !GetAtt WebRole.Arn
+      Code:
+        S3Bucket: !If
+          - DeriveCodeBucket
+          - !Sub "arenabench-artifacts-${AWS::AccountId}"
+          - !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      Environment:
+        Variables:
+          ARTIFACTS_BUCKET: !If
+            - DeriveBucket
+            - !Sub "arenabench-artifacts-${AWS::AccountId}"
+            - !Ref ArtifactsBucket
+          ARENABENCH_TABLE: !Ref TableName
+          APP_DOMAIN: !Ref DomainName
+          ALLOWED_EMAILS: !Ref AllowedEmails
+          MAIL_FROM: !Ref MailFrom
+          AUTH_SECRET_PARAM: !Ref AuthSecretParam
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: arenabench-web
+      ProtocolType: HTTP
+
+  ApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt WebFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: $default
+      Target: !Sub "integrations/${ApiIntegration}"
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+
+  ApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*"
+
+  ApexDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Ref DomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref Certificate
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+
+  WwwDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Sub "www.${DomainName}"
+      DomainNameConfigurations:
+        - CertificateArn: !Ref Certificate
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+
+  ApexMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref HttpApi
+      DomainName: !Ref ApexDomain
+      Stage: !Ref ApiStage
+
+  WwwMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref HttpApi
+      DomainName: !Ref WwwDomain
+      Stage: !Ref ApiStage
+
+  ApexAlias:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt ApexDomain.RegionalDomainName
+            HostedZoneId: !GetAtt ApexDomain.RegionalHostedZoneId
+        - Name: !Ref DomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt ApexDomain.RegionalDomainName
+            HostedZoneId: !GetAtt ApexDomain.RegionalHostedZoneId
+        - Name: !Sub "www.${DomainName}"
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt WwwDomain.RegionalDomainName
+            HostedZoneId: !GetAtt WwwDomain.RegionalHostedZoneId
+        - Name: !Sub "www.${DomainName}"
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt WwwDomain.RegionalDomainName
+            HostedZoneId: !GetAtt WwwDomain.RegionalHostedZoneId
+
+Outputs:
+  ApiEndpoint:
+    Description: The API's default endpoint (works before DNS delegates).
+    Value: !GetAtt HttpApi.ApiEndpoint
+  WebFunctionArn:
+    Value: !GetAtt WebFunction.Arn
