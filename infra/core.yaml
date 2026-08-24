@@ -705,8 +705,15 @@ Resources:
                 "token.actions.githubusercontent.com:sub":
                   # Pushes to main, and jobs that declare `environment: infra`
                   # (an environment claim replaces the ref claim in `sub`).
+                  # Each subject is spelled twice: this owner's repos mint
+                  # the immutable-id form (owner@id/repo@id — CloudTrail
+                  # verified on 2026-08-22 for macanderson/stella), and the
+                  # documented plain form is kept in case the org setting
+                  # ever reverts. Exact strings, no wildcards.
                   - repo:macanderson/arenabench:ref:refs/heads/main
                   - repo:macanderson/arenabench:environment:infra
+                  - repo:macanderson@542881/arenabench@1344356632:ref:refs/heads/main
+                  - repo:macanderson@542881/arenabench@1344356632:environment:infra
       Policies:
         - PolicyName: arenabench-deploy
           PolicyDocument:
