@@ -246,12 +246,19 @@ class TestSubmitTaskValidation:
     """
 
     def _registry_with(self, monkeypatch, names: list[str]) -> None:
-        import arenabench.registry as registry_mod
+        # Patched on `arenabench.cloud`, not on `arenabench.registry`: cloud.py
+        # does `from .registry import DEFAULT_REGISTRY`, so it holds its own
+        # reference and rebinding the name in the registry module leaves both
+        # of cloud.py's readers looking at the real one. Patching the wrong
+        # module made this test assert nothing — the unknown-task refusal never
+        # fired, the run fell through to a real boto3 client, and the failure
+        # only surfaced in CI as `NoRegionError` (#2380's ejection CI).
+        import arenabench.cloud as cloud_mod
 
         fake = SimpleNamespace(
             tasks=lambda key: [SimpleNamespace(name=n) for n in names]
         )
-        monkeypatch.setattr(registry_mod, "DEFAULT_REGISTRY", fake)
+        monkeypatch.setattr(cloud_mod, "DEFAULT_REGISTRY", fake)
 
     def test_an_unknown_task_id_refuses_before_any_upload_or_job(
         self, tmp_path, capsys, monkeypatch

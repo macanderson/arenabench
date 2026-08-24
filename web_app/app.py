@@ -322,13 +322,15 @@ def dashboard(email: str) -> dict:
             f"<td class='{cls}'>{html.escape(job['status'])}</td>"
             f"<td class='dim'>{html.escape(job['detail'])}</td></tr>"
         )
+    ref_body = "".join(ref_rows) or "<tr><td class=dim>none</td></tr>"
+    job_body = "".join(job_rows) or "<tr><td class=dim>none yet</td></tr>"
     return page(
         "ArenaBench — control plane",
         "<h1>ArenaBench control plane</h1>"
         f"<p class='dim'>{html.escape(email)} — <a href='/logout'>sign out"
         "</a></p>"
         "<h2>Built binaries</h2><table><tr><th>ref</th><th>commit</th>"
-        f"<th>built</th></tr>{''.join(ref_rows) or '<tr><td class=dim>none</td></tr>'}</table>"
+        f"<th>built</th></tr>{ref_body}</table>"
         "<form class='inline' method='post' action='/action/build'>"
         f"<input type='hidden' name='csrf' value='{csrf}'>"
         "<input type='text' name='ref' placeholder='git ref (e.g. main)' required>"
@@ -337,7 +339,7 @@ def dashboard(email: str) -> dict:
         f"<input type='hidden' name='csrf' value='{csrf}'>"
         "<button type='submit'>Submit smoke trial</button></form>"
         "<h2>Recent jobs</h2><table><tr><th>at</th><th>run</th><th>job</th>"
-        f"<th>status</th><th>detail</th></tr>{''.join(job_rows) or '<tr><td class=dim>none yet</td></tr>'}</table>",
+        f"<th>status</th><th>detail</th></tr>{job_body}</table>",
     )
 
 

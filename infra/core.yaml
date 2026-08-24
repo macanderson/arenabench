@@ -563,12 +563,24 @@ Resources:
                 Resource:
                   - !GetAtt RunsTable.Arn
                   - !Sub ${RunsTable.Arn}/index/*
+              # Two ARNs, and the second one is not decoration.
+              # `GetParametersByPath` authorizes against the PATH NODE
+              # (`parameter/arenabench`), not against the parameters the call
+              # returns, so a policy naming only `parameter/arenabench/*`
+              # fetches nothing. The failure is quiet in the worst way: the
+              # entrypoint logs "no SSM credentials readable" and carries on,
+              # and the trial dies a minute later on "required credentials are
+              # not set" — a message that points at the match file, not at
+              # this policy. Witnessed on run r20260824-112928-748d02, the
+              # ejection's own acceptance run.
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
                   - ssm:GetParameters
                   - ssm:GetParametersByPath
-                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/arenabench/*
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/arenabench
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/arenabench/*
               # Every credential under /arenabench is a SecureString, and
               # reading one is two authorizations, not one: SSM returns the
               # ciphertext and KMS decrypts it. Without this the job is

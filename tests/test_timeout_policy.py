@@ -74,11 +74,16 @@ def _launch_with_multiplier(
             "tasks": ["alpha"],
             "sut_ref": "",
             "agent_timeout_multiplier": multiplier,
+            # A non-Stella seat on purpose. The multiplier is a property of
+            # the match, not of who is sitting in it, so seating Stella made
+            # this test depend on a harbor adapter it has no use for —
+            # green only on a machine that could also run a Stella seat, and
+            # red in CI once ArenaBench left the monorepo (#2380).
             "contestants": [
                 {
                     "name": "s",
-                    "agent": "stella",
-                    "engine": {"api": "openrouter", "model": "x/y"},
+                    "agent": "claude-code",
+                    "engine": {"api": "anthropic", "model": "x/y"},
                 }
             ],
         }

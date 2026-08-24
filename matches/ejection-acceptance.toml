@@ -1,0 +1,60 @@
+# arenabench match — the acceptance run for the ejection (#2380).
+#
+#   cloud:  arenabench cloud run matches/ejection-acceptance.toml --no-gate
+#
+# One seat, one task, one attempt. This match is not a measurement and must
+# never be quoted as one: it exists to prove that the ejected repository can
+# still run a real cloud match end to end — CodeBuild cloning
+# macanderson/arenabench with PkgPath=".", the runner image fetching Stella's
+# harbor adapter from the Stella repository at build time, credentials coming
+# from SSM rather than a laptop, and a scored trial landing in S3 under the
+# run id.
+#
+# `regex-log` is the task because the recorded bar scored 5/5 on it: a failure
+# here is far more likely to be the plumbing this run is testing than the
+# agent, which is exactly what an acceptance run wants.
+#
+# WHICH PROVIDER THIS SEAT USES IS THE MOST-EDITED LINE IN THIS FILE, AND
+# NONE OF THE EDITS WERE ABOUT MEASUREMENT. Two gateways refused before this
+# one, both for the same reason and neither a property of the harness:
+#
+#   OpenRouter  HTTP 402 mid-run. The gateway prices a request against the
+#               output ceiling the caller asks for, so a $0.80 balance
+#               refused a 66,101-token ask it could only afford 64,356 of —
+#               after the trial had already spent $0.55.
+#   z.ai        HTTP 429 on the first call: "Insufficient balance or no
+#               resource package."
+#   Anthropic   HTTP 400 on the first call: "Your credit balance is too low
+#               to access the Anthropic API."
+#
+# So the seat is Claude Code on the subscription token, which is the one
+# credentialed path in SSM that bills a plan rather than API credit. That
+# also makes this a legitimate contestant rather than a stand-in: Claude
+# Code is the bar every Stella number is quoted against. Seating Stella
+# here again is a one-line edit the moment any provider key has funds.
+[match]
+name = "ejection acceptance: one task, one seat"
+dataset = "terminal-bench-2.1"
+tasks = ["regex-log"]
+attempts = 1
+concurrency = 1
+
+[[contestant]]
+id = "claude-code"
+name = "Claude Code"
+agent = "claude-code"
+color = "#FF6B9D"
+
+  [contestant.engine]
+  api = "anthropic"
+  model = "claude-sonnet-5"
+  reasoning = true
+  # `medium`, not `xhigh` — measured 2026-08-03, xhigh timed out on every
+  # step budget it was given on tasks of this shape; medium finished.
+  effort = "medium"
+  # No base_url: this seat runs at Anthropic, authenticated by the
+  # subscription token rather than a metered key.
+
+  [contestant.env]
+  # Names only — never values. Resolved from SSM /arenabench/* in the cloud.
+  required = ["CLAUDE_CODE_OAUTH_TOKEN"]
