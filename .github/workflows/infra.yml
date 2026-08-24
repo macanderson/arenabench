@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ArenaBench infrastructure gate + deploy.
+#
+# Pull requests touching infra/ get a credential-free cfn-lint pass; pushes
+# to main (and manual dispatch) additionally deploy infra/core.yaml to the
+# arenabench-core stack via the arenabench-deploy role, assumed over GitHub
+# OIDC — no long-lived AWS keys anywhere in this repository.
+#
+# Bootstrap note: the deploy role is created by the very stack this workflow
+# deploys, so the FIRST deploy in an account is a manual, admin-run
+# `aws cloudformation deploy` (see infra/README.md). After that, CI owns it.
+
+name: infra
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: cfn-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: install cfn-lint
+        run: pip install cfn-lint==1.55.1
+
+      - name: cfn-lint
+        run: cfn-lint infra/core.yaml
+
+  deploy:
+    name: deploy arenabench-core
+    if: github.event_name != 'pull_request'
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The `infra` environment matches the deploy role's second trusted
+    # subject (repo:...:environment:infra) and is where a maintainer can
+    # later attach protection rules without touching the trust policy.
+    environment: infra
+    # One deploy at a time: two overlapping `cloudformation deploy` calls
+    # against the same stack fail on each other's in-progress changeset.
+    concurrency:
+      group: infra-deploy
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: arn:aws:iam::578673726240:role/arenabench-deploy
+          aws-region: us-east-1
+
+      # VpcId and SubnetIds have no template default, and `aws cloudformation
+      # deploy` has no use-previous-value flag — every no-default parameter
+      # must be passed explicitly on every run. So read the live stack's
+      # current values and pass them straight back through. This is also why
+      # the first deploy cannot come from CI: there is no stack to read yet.
+      - name: read the stack's network parameters
+        id: params
+        run: |
+          set -euo pipefail
+          vpc_id=$(aws cloudformation describe-stacks --stack-name arenabench-core \
+            --query "Stacks[0].Parameters[?ParameterKey=='VpcId'].ParameterValue" --output text)
+          subnet_ids=$(aws cloudformation describe-stacks --stack-name arenabench-core \
+            --query "Stacks[0].Parameters[?ParameterKey=='SubnetIds'].ParameterValue" --output text)
+          test -n "$vpc_id" && test -n "$subnet_ids"
+          echo "vpc_id=$vpc_id" >> "$GITHUB_OUTPUT"
+          echo "subnet_ids=$subnet_ids" >> "$GITHUB_OUTPUT"
+
+      - name: deploy
+        run: |
+          aws cloudformation deploy \
+            --template-file infra/core.yaml \
+            --stack-name arenabench-core \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "VpcId=${{ steps.params.outputs.vpc_id }}" \
+              "SubnetIds=${{ steps.params.outputs.subnet_ids }}"

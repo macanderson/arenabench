@@ -22,16 +22,17 @@ Parameters:
     Description: Default git remote for SUT (system under test) binary builds.
   InfraGitUrl:
     Type: String
-    Default: https://github.com/macanderson/stella.git
+    Default: https://github.com/macanderson/arenabench.git
     Description: >-
-      Git remote holding the ArenaBench package and this infra directory.
-      After ejection, point this at the standalone arenabench repository.
+      Git remote holding the ArenaBench package and this infra directory —
+      the standalone arenabench repository.
   PkgPath:
     Type: String
-    Default: arenabench
+    Default: "."
     Description: >-
-      Path of the ArenaBench package inside InfraGitUrl's repo. "arenabench"
-      while ArenaBench lives inside the Stella monorepo; "." after ejection.
+      Path of the ArenaBench package inside InfraGitUrl's repo. "." now that
+      ArenaBench is its own repository; a fork that vendors ArenaBench into
+      a subdirectory sets this to that subdirectory.
   VercelTeamSlug:
     Type: String
     Default: oxagen
@@ -39,6 +40,16 @@ Parameters:
     Type: String
     Default: 91d89f33169baa11a2e810804f8d25f5639aa440
     Description: SHA-1 thumbprint of oidc.vercel.com's TLS certificate.
+  CreateGitHubOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Whether this stack creates the token.actions.githubusercontent.com
+      OIDC provider. An AWS account can hold exactly one provider per URL,
+      so set "false" if another stack or a hand-made provider already owns
+      it; the deploy role then binds to that existing provider (its ARN is
+      the same either way).
   OnDemandMaxvCpus:
     Type: Number
     Default: 384
@@ -62,6 +73,9 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 30
+
+Conditions:
+  CreateGitHubOidc: !Equals [!Ref CreateGitHubOidcProvider, "true"]
 
 Resources:
   # ---------------------------------------------------------------- storage
@@ -301,6 +315,13 @@ Resources:
             Value: main
           - Name: PKG_PATH
             Value: !Ref PkgPath
+          # The Stella seat's Harbor adapter is fetched at image-build time
+          # from the Stella repository (this repo no longer vendors it);
+          # override STELLA_ADAPTER_REF at start-build to pin a branch/tag.
+          - Name: STELLA_GIT_URL
+            Value: https://github.com/macanderson/stella.git
+          - Name: STELLA_ADAPTER_REF
+            Value: main
           - Name: ECR_URI
             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/arenabench/runner
       Source:
@@ -316,7 +337,7 @@ Resources:
                 - git clone --filter=blob:none "$GIT_URL" /tmp/src
                 - cd /tmp/src && git checkout "$GIT_REF"
                 - export SHA="$(git rev-parse HEAD)"
-                - docker build -f "$PKG_PATH/infra/runner/Dockerfile" --build-arg "PKG_PATH=$PKG_PATH" -t "$ECR_URI:latest" -t "$ECR_URI:$SHA" .
+                - docker build -f "$PKG_PATH/infra/runner/Dockerfile" --build-arg "PKG_PATH=$PKG_PATH" --build-arg "STELLA_GIT_URL=$STELLA_GIT_URL" --build-arg "STELLA_ADAPTER_REF=$STELLA_ADAPTER_REF" -t "$ECR_URI:latest" -t "$ECR_URI:$SHA" .
             post_build:
               commands:
                 - docker push "$ECR_URI:latest"
@@ -742,6 +763,242 @@ Resources:
                 Resource:
                   - !Sub ${BatchLogGroup.Arn}:*
                   - !Sub ${BuildLogGroup.Arn}:*
+              # Magic-link login mail. arenabench.org is the sending
+              # identity; the wildcard also covers the recipient identities
+              # SES requires while the account is in the sandbox.
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/arenabench.org
+                  - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+
+  # ----------------------------------------------------------- github oidc
+  # CI deploys of this very stack: .github/workflows/infra.yml assumes
+  # arenabench-deploy via GitHub's OIDC issuer — no long-lived keys in the
+  # repository. Chicken-and-egg by construction: the role is created by the
+  # stack it deploys, so the FIRST deploy (and any change to this role's own
+  # policy that the old policy does not permit) is a manual, admin-run
+  # deploy; after that CI owns the stack. See infra/README.md.
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateGitHubOidc
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # Since 2023 AWS validates GitHub's issuer against its own trust store
+      # and ignores these thumbprints, but the API still requires the field;
+      # these are GitHub's published intermediate thumbprints.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: arenabench-deploy
+      # The provider ARN is spelled out rather than !GetAtt'd so the role
+      # still resolves when CreateGitHubOidcProvider=false and the provider
+      # belongs to another stack — the ARN is determined by the URL alone.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+              StringLike:
+                "token.actions.githubusercontent.com:sub":
+                  # Pushes to main, and jobs that declare `environment: infra`
+                  # (an environment claim replaces the ref claim in `sub`).
+                  - repo:macanderson/arenabench:ref:refs/heads/main
+                  - repo:macanderson/arenabench:environment:infra
+      Policies:
+        - PolicyName: arenabench-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The stack itself.
+              - Effect: Allow
+                Action: cloudformation:*
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/arenabench-core/*
+              - Effect: Allow
+                Action: cloudformation:ValidateTemplate
+                Resource: "*" # ValidateTemplate takes no resource ARN.
+              # CloudFormation mutates resources with the caller's own
+              # credentials (no service role is passed), so everything the
+              # template manages must be grantable here. Each family is
+              # scoped as tightly as its API allows; where a statement is
+              # broad the comment says why.
+              - Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListRolePolicies
+                  - iam:ListRoleTags
+                  - iam:PutRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:UpdateRole
+                  - iam:UpdateRoleDescription
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/arenabench-*
+              # Self-referential on purpose: arenabench-deploy matches
+              # arenabench-*, so CI can evolve every role in this template
+              # including its own. That is inherent to a self-mutating
+              # stack — the alternative (excluding this role) would make
+              # every edit to this policy a manual deploy forever.
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/arenabench-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService:
+                      - batch.amazonaws.com
+                      - codebuild.amazonaws.com
+                      - ec2.amazonaws.com
+                      - ecs-tasks.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - iam:AddRoleToInstanceProfile
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:TagInstanceProfile
+                  - iam:UntagInstanceProfile
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/arenabench-*
+              # Both providers this template manages: Vercel's (path embeds
+              # the team slug, hence the wildcard) and GitHub's.
+              - Effect: Allow
+                Action:
+                  - iam:AddClientIDToOpenIDConnectProvider
+                  - iam:CreateOpenIDConnectProvider
+                  - iam:DeleteOpenIDConnectProvider
+                  - iam:GetOpenIDConnectProvider
+                  - iam:ListOpenIDConnectProviderTags
+                  - iam:RemoveClientIDFromOpenIDConnectProvider
+                  - iam:TagOpenIDConnectProvider
+                  - iam:UntagOpenIDConnectProvider
+                  - iam:UpdateOpenIDConnectProviderThumbprint
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.vercel.com/*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+              # Bucket-level only (no /*): the deploy role configures the
+              # bucket (encryption, lifecycle, public-access block — a long
+              # and churning action list, hence s3:*) but is deliberately
+              # not granted object read/write.
+              - Effect: Allow
+                Action: s3:*
+                Resource: !Sub arn:aws:s3:::arenabench-artifacts-${AWS::AccountId}
+              - Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:DescribeTable
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:ListTagsOfResource
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:UpdateTable
+                  - dynamodb:UpdateTimeToLive
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/arenabench
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/arenabench/index/*
+              - Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:DeleteLifecyclePolicy
+                  - ecr:DeleteRepository
+                  - ecr:DescribeRepositories
+                  - ecr:GetLifecyclePolicy
+                  - ecr:ListTagsForResource
+                  - ecr:PutLifecyclePolicy
+                  - ecr:TagResource
+                  - ecr:UntagResource
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/arenabench/*
+              # Batch offers no useful resource-level scoping for stack
+              # management: the compute environments are deliberately
+              # unnamed (see OnDemandComputeEnvironment) so their ARNs
+              # cannot be predicted, and Describe* are list calls. Bounded
+              # by the action list instead — no SubmitJob/TerminateJob here.
+              - Effect: Allow
+                Action:
+                  - batch:CreateComputeEnvironment
+                  - batch:CreateJobQueue
+                  - batch:DeleteComputeEnvironment
+                  - batch:DeleteJobQueue
+                  - batch:DeregisterJobDefinition
+                  - batch:DescribeComputeEnvironments
+                  - batch:DescribeJobDefinitions
+                  - batch:DescribeJobQueues
+                  - batch:RegisterJobDefinition
+                  - batch:TagResource
+                  - batch:UntagResource
+                  - batch:UpdateComputeEnvironment
+                  - batch:UpdateJobQueue
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetProjects
+                  - codebuild:CreateProject
+                  - codebuild:DeleteProject
+                  - codebuild:UpdateProject
+                Resource: !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/arenabench-*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DeleteRetentionPolicy
+                  - logs:ListTagsForResource
+                  - logs:PutRetentionPolicy
+                  - logs:TagResource
+                  - logs:UntagResource
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/arenabench/*
+              - Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: "*" # DescribeLogGroups is a list call; no resource ARN.
+              # EC2's create/tag calls demand multi-resource ARN lists plus
+              # request-tag conditions that churn with every template edit,
+              # and its Describe* accept no resource ARNs at all. Bounded by
+              # the action list instead: security group, launch template,
+              # and tag verbs only — no RunInstances, no instance mutation.
+              - Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:CreateLaunchTemplate
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:CreateSecurityGroup
+                  - ec2:CreateTags
+                  - ec2:DeleteLaunchTemplate
+                  - ec2:DeleteLaunchTemplateVersions
+                  - ec2:DeleteSecurityGroup
+                  - ec2:DeleteTags
+                  - ec2:DescribeLaunchTemplateVersions
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeSecurityGroupRules
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeTags
+                  - ec2:DescribeVpcs
+                  - ec2:ModifyLaunchTemplate
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupIngress
+                Resource: "*"
 
 Outputs:
   ArtifactsBucketName:
@@ -774,3 +1031,8 @@ Outputs:
   VercelWebRoleArn:
     Description: Role the Vercel app assumes via OIDC (AWS_ROLE_ARN env var).
     Value: !GetAtt VercelWebRole.Arn
+  GitHubDeployRoleArn:
+    Description: >-
+      Role .github/workflows/infra.yml assumes via GitHub OIDC to deploy
+      this stack.
+    Value: !GetAtt GitHubDeployRole.Arn

@@ -8,12 +8,14 @@ nothing when idle. One CloudFormation template (`core.yaml`) is the whole
 control plane; the web app lives on Vercel (arenabench.org) and reaches AWS
 through an OIDC-assumed role, never long-lived keys.
 
-**Standalone by design.** ArenaBench is being ejected from the Stella
-monorepo. Nothing here assumes that monorepo: the system under test (SUT) is
-always fetched by **git URL + ref**, the runner image locates the package via
-a `PkgPath` parameter (`arenabench` today, `.` post-ejection), and Stella is
-just the first entry in the agent roster — Claude Code is the required day-1
-comparison arm, anything else is a seat in a match TOML.
+**Standalone by design.** ArenaBench is its own repository, ejected from the
+Stella monorepo. Nothing here assumes that monorepo: the system under test
+(SUT) is always fetched by **git URL + ref**, the runner image locates the
+package via a `PkgPath` parameter (`.` in this repository), the Stella seat's
+Harbor adapter is fetched at image-build time from the Stella repository
+rather than vendored here, and Stella is just the first entry in the agent
+roster — Claude Code is the required day-1 comparison arm, anything else is a
+seat in a match TOML.
 
 ## Architecture
 
@@ -49,16 +51,36 @@ hourly around the clock.
 
 ## Runbook
 
-Deploy / update (idempotent):
+### Deploying the stack
+
+Day to day, nobody runs `aws cloudformation deploy` by hand: change
+`infra/core.yaml` on a branch, open a PR (`.github/workflows/infra.yml`
+runs cfn-lint on it), merge to `main`, and the workflow's `deploy` job
+assumes the `arenabench-deploy` role over GitHub OIDC and deploys the
+stack. `VpcId`/`SubnetIds` have no defaults; the job reads the live stack's
+current values and passes them back through, so a merge never has to know
+them.
+
+**One-time bootstrap.** The deploy role and the GitHub OIDC provider are
+resources *of this stack*, so the first deploy in an account cannot come
+from CI — there is no role to assume and no stack to read parameters from.
+An admin runs the manual deploy below once; every deploy after that is CI's.
+The same manual path is the break-glass route if the workflow (or the
+role's own policy) is ever wedged:
 
 ```bash
 aws cloudformation deploy \
-  --template-file arenabench/infra/core.yaml \
+  --template-file infra/core.yaml \
   --stack-name arenabench-core \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides VpcId=<default-vpc> \
       'SubnetIds=<subnet-1>,<subnet-2>,...'
 ```
+
+If the account already holds a `token.actions.githubusercontent.com` OIDC
+provider (an account can hold only one per URL), bootstrap with
+`CreateGitHubOidcProvider=false` in `--parameter-overrides`; the role binds
+to the existing provider by its deterministic ARN.
 
 Build the Stella binary — tip of `main` by default, any branch on request:
 
@@ -82,7 +104,10 @@ reused only if it was built from the commit that name points at now. Before
 whichever build ran last, forever, and recorded a real commit that was simply
 not the one asked for.
 
-Rebuild the runner image after changing `runner/`:
+Rebuild the runner image after changing `runner/` — and after a Stella
+`bench/harbor_adapter` change you want the seats to pick up, since the
+adapter is cloned from the Stella repository at image-build time
+(`STELLA_GIT_URL` / `STELLA_ADAPTER_REF` build args, default `main`):
 
 ```bash
 aws codebuild start-build --project-name arenabench-runner-image

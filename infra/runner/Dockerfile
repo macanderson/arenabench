@@ -6,9 +6,9 @@
 # runs `arenabench run` against a match TOML fetched from S3.
 #
 # Build context is the repository root. PKG_PATH locates the ArenaBench
-# package inside it: "arenabench" while ArenaBench lives in the Stella
-# monorepo, "." once it is ejected into its own repository.
-ARG PKG_PATH=arenabench
+# package inside it: "." for this standalone repository; a fork that vendors
+# ArenaBench into a subdirectory passes that subdirectory.
+ARG PKG_PATH=.
 
 # Harbor is the benchmark harness ArenaBench drives; without it `arenabench
 # run` dies at launch with `harbor is not on PATH` and no trial ever starts.
@@ -19,20 +19,24 @@ ARG PKG_PATH=arenabench
 # infra README.
 ARG HARBOR_VERSION=0.6.1
 
-# The Stella seat's Harbor adapter, which lives outside the ArenaBench
-# package. Its absence is silent and lethal: harbor_agent.py falls back to
-# `_Base = object` and Harbor dies with `ArenaStellaAgent() takes no
-# arguments` — while exiting 0, so the seat reports "done" having run
-# nothing. Empty once ArenaBench is ejected and Stella is just another
-# contestant fetched by ref.
-ARG STELLA_ADAPTER_PATH=bench/harbor_adapter
+# The Stella seat's Harbor adapter, which lives in the Stella repository
+# (bench/harbor_adapter) — this repo no longer carries a copy, so it is
+# fetched at build time from STELLA_GIT_URL at STELLA_ADAPTER_REF (a branch
+# or tag; `git clone --branch` does not take a bare commit SHA). Its absence
+# is silent and lethal: harbor_agent.py falls back to `_Base = object` and
+# Harbor dies with `ArenaStellaAgent() takes no arguments` — while exiting
+# 0, so the seat reports "done" having run nothing. That is why the fetch
+# ends in an import assertion that fails the *build* instead of the match.
+ARG STELLA_GIT_URL=https://github.com/macanderson/stella.git
+ARG STELLA_ADAPTER_REF=main
 
 # ECR Public mirror of the official image: Docker Hub rate-limits anonymous
 # pulls from CodeBuild's shared egress IPs (429s), ECR Public does not.
 FROM public.ecr.aws/docker/library/ubuntu:24.04
 ARG PKG_PATH
 ARG HARBOR_VERSION
-ARG STELLA_ADAPTER_PATH
+ARG STELLA_GIT_URL
+ARG STELLA_ADAPTER_REF
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -77,12 +81,17 @@ RUN python3 -m pip install --break-system-packages "harbor==${HARBOR_VERSION}" \
     && harbor --version
 
 # The Stella seat's Harbor adapter (`stella_harbor`), which `arenabench`'s
-# ArenaStellaAgent subclasses. Installed as a package rather than dropped on
-# PYTHONPATH so a missing import fails the *build* instead of the match.
-COPY ${STELLA_ADAPTER_PATH}/pyproject.toml /opt/stella-harbor/pyproject.toml
-COPY ${STELLA_ADAPTER_PATH}/README.md /opt/stella-harbor/README.md
-COPY ${STELLA_ADAPTER_PATH}/stella_harbor /opt/stella-harbor/stella_harbor
-RUN python3 -m pip install --break-system-packages /opt/stella-harbor \
+# ArenaStellaAgent subclasses. A sparse, blobless, depth-1 clone fetches
+# only bench/harbor_adapter from the Stella repository; installed as a
+# package rather than dropped on PYTHONPATH so a missing import fails the
+# *build* instead of the match. Note this layer floats with the ref: rebuild
+# the image (arenabench-runner-image) to pick up adapter changes.
+RUN git clone --depth=1 --filter=blob:none --sparse \
+        --branch "${STELLA_ADAPTER_REF}" "${STELLA_GIT_URL}" /tmp/stella-src \
+    && git -C /tmp/stella-src sparse-checkout set bench/harbor_adapter \
+    && cp -a /tmp/stella-src/bench/harbor_adapter /opt/stella-harbor \
+    && rm -rf /tmp/stella-src \
+    && python3 -m pip install --break-system-packages /opt/stella-harbor \
     && python3 -c "import stella_harbor"
 # The runner resolves the adapter *source* through this variable (or a Stella
 # checkout, which the container deliberately does not carry): `stage_adapter`
