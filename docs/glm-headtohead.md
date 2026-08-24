@@ -90,11 +90,14 @@ that is indistinguishable from a genuine failure.
 ## Launching
 
 ```bash
-export ARENABENCH_STELLA_ADAPTER=<repo>/bench/harbor_adapter
-export STELLA_BINARY=<repo>/target/x86_64-unknown-linux-gnu/release/stella
-cd arenabench && PYTHONPATH=. python3 -m arenabench serve
+export ARENABENCH_STELLA_ADAPTER=<stella>/bench/harbor_adapter
+export STELLA_BINARY=<stella>/target/x86_64-unknown-linux-gnu/release/stella
+PYTHONPATH=. python3 -m arenabench serve   # from this repository's root
 # -> http://127.0.0.1:8900
 ```
+
+`<stella>` is a checkout of [Stella](https://github.com/macanderson/stella),
+whose repository ships the adapter.
 
 Both variables are read from the arena's own environment. Everything else is
 per-seat and pasted into the UI, because a match between two providers needs

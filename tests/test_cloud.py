@@ -13,7 +13,7 @@ call, so a drifted parameter name fails here instead of in a container that
 billed real compute first.
 
 These tests are the witness for #2099: none of them can pass on a tree
-without ``arenabench/arenabench/cloud.py``.
+without ``arenabench/cloud.py``.
 
 The ``_cmd_cloud_*`` CLI path lives in ``test_cloud_commands.py`` and the
 fakes both halves share live in ``cloud_fakes.py``.

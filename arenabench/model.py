@@ -494,7 +494,7 @@ class Engine:
     #: ``bench/harbor_adapter/stella_harbor/loop_mode.py``, #4023). Kept as a
     #: declaration rather than retired: a template's stated intent to measure
     #: the bare loop is still worth refusing on any non-``stella`` seat
-    #: (``arenabench/arenabench/config.py``) and still worth recording.
+    #: (``arenabench/config.py``) and still worth recording.
     #: Declared on the engine rather than exported at launch: the runner
     #: scrubs every ambient ``STELLA_*`` so a host setting can never quietly
     #: reconfigure a seat. Agents with no pipeline ignore it, like the role

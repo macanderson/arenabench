@@ -346,12 +346,18 @@ task grid, verdicts and timing are all real.
 ### Running Stella as a contestant
 
 Stella's Harbor adapter is a separate, AGPL-licensed package that lives in the
-Stella repository. Point ArenaBench at it:
+[Stella repository](https://github.com/macanderson/stella). Point ArenaBench
+at a checkout of it:
 
 ```bash
 export ARENABENCH_STELLA_ADAPTER=/path/to/stella/bench/harbor_adapter
 export STELLA_BINARY=/path/to/stella/target/x86_64-unknown-linux-gnu/release/stella
 ```
+
+The checkout itself is found from the adapter path; set
+`ARENABENCH_STELLA_REPO` to the repository root when the adapter lives
+somewhere else, since SUT pinning resolves `sut_ref` against that checkout's
+git history.
 
 The binary must be a Linux/x86_64 build — task images publish `linux/amd64`
 only. A native macOS build will be uploaded happily and then fail to exec
