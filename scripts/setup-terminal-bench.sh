@@ -37,11 +37,21 @@ else
   fail "docker is not reachable (start Docker Desktop, or \`colima start\`)"
 fi
 
-python3 - <<'PY' || fail "python 3.11+ is required"
+# `fail` records the problem and RETURNS 0 (it sets `ok=1` and carries on, so
+# the whole preflight reports every fault instead of stopping at the first).
+# That is what made the previous form here wrong: `python3 … || fail …`
+# followed by `[ $? -eq 0 ] && pass …` tested the exit code of `fail`, which
+# is always 0 — so a too-old interpreter printed a ✗ and a ✓ for the same
+# check. An `if` tests the interpreter itself and cannot drift that way.
+if python3 - <<'PY'
 import sys
 raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
 PY
-[ $? -eq 0 ] && pass "python $(python3 -V 2>&1 | cut -d' ' -f2)"
+then
+  pass "python $(python3 -V 2>&1 | cut -d' ' -f2)"
+else
+  fail "python 3.11+ is required"
+fi
 
 # Task images publish linux/amd64 only. Without this a multi-arch base builds
 # arm64 on Apple silicon and then cannot exec an x86_64 agent binary — which
@@ -97,13 +107,17 @@ if [ "$WITH_SUT" = 1 ]; then
   repo="${STELLA_REPO:-${ARENABENCH_STELLA_ADAPTER:-}/../..}"
   if [ -f "$repo/Cargo.toml" ]; then
     warn "cross-building the Stella binary for linux/x86_64 (glibc 2.17)…"
-    ( cd "$repo" \
-      && rustup target add x86_64-unknown-linux-gnu >/dev/null 2>&1 \
-      && cargo zigbuild --release --locked \
-           --target x86_64-unknown-linux-gnu.2.17 \
-           --package stella-cli --bin stella ) \
-      && pass "built $repo/target/x86_64-unknown-linux-gnu/release/stella" \
-      || fail "cross-build failed (needs cargo-zigbuild and zig)"
+    # if/then/else rather than `&& pass … || fail …`: in that form a non-zero
+    # `pass` would run `fail` as well, reporting one build as both.
+    if ( cd "$repo" \
+         && rustup target add x86_64-unknown-linux-gnu >/dev/null 2>&1 \
+         && cargo zigbuild --release --locked \
+              --target x86_64-unknown-linux-gnu.2.17 \
+              --package stella-cli --bin stella ); then
+      pass "built $repo/target/x86_64-unknown-linux-gnu/release/stella"
+    else
+      fail "cross-build failed (needs cargo-zigbuild and zig)"
+    fi
   else
     fail "--with-sut: no Cargo.toml at $repo (set STELLA_REPO)"
   fi

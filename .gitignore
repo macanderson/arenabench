@@ -37,3 +37,10 @@ tests/fixtures/matches/*/
 # ARENABENCH_CREDENTIALS override that lands one here must never be tracked.
 credentials.env
 credentials.toml
+
+# Match files written by scripts/quickstart.py. They are output, not source:
+# every one is reproducible from its own header (the seed is printed in it and
+# on the console), and a committed copy would go stale against the dataset the
+# moment a task is added or renamed. Commit a match you intend to KEEP under
+# its own name instead — matches/ is full of those.
+matches/generated-*.toml
