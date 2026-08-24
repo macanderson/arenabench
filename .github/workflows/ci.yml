@@ -1,11 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# ArenaBench CI. This workflow is written against the layout of THIS folder
-# as a repository root: while arenabench still lives inside the stella
-# monorepo, GitHub never reads a nested .github/ and this file is inert —
-# the interim gate is the "arenabench — pytest (until ejection)" step in the
-# monorepo's bench.yml. The moment the folder is ejected, this file is the
-# whole gate, with no edits needed.
+# ArenaBench CI — the whole gate for this repository. Written while
+# arenabench still lived inside the stella monorepo (where a nested .github/
+# is never read and this file was inert); since the ejection it runs as-is.
 
 name: ci
 
@@ -39,6 +36,12 @@ jobs:
       - name: ruff
         run: uv run --with ruff --no-project ruff check .
 
+      # The ArenaBench half of the role-names guard that split at ejection —
+      # the stella repo's half covers its own producers. See the script's
+      # header for the failure it catches.
+      - name: role names have one spelling
+        run: bash scripts/check-role-names.sh
+
   ui:
     name: ui — build the static client
     runs-on: ubuntu-latest
@@ -52,15 +55,28 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
-      # No dependencies — Node strips the type annotations natively — so it
-      # runs before `npm ci` and fails fast on a reading-tools regression.
+      # No dependencies — Node strips the type annotations natively — so these
+      # run before `npm ci` and fail fast on a reading-tools regression or on
+      # a port drifting from its vendored Rust golden (ui/golden/).
       - name: the transcript reading-tool checks pass
         working-directory: ui
         run: node scripts/check-transcript-view.mjs
 
+      - name: the diff-view port matches the vendored Rust golden
+        working-directory: ui
+        run: node scripts/check-diff-view-parity.mjs
+
+      - name: the word-highlight port matches the vendored Rust golden
+        working-directory: ui
+        run: node scripts/check-word-highlight-parity.mjs
+
       - name: npm ci
         working-directory: ui
         run: npm ci
+
+      - name: typecheck
+        working-directory: ui
+        run: npm run typecheck
 
       # `build` exports the Next.js app and syncs it into arenabench/web/ —
       # the directory the Python server serves and the wheel ships. The
