@@ -74,6 +74,7 @@ _ENGINE_ROOT_FIELDS = frozenset(
         "auto_mode",
         "effort_auto",
         "reasoning_auto",
+        "minimal_prompt",
         "headless_scope_bypass",
         "model_timeout_secs",
         "compaction_budget_tokens",
