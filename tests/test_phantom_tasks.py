@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from arenabench.model import MatchSpec
 
+
 class TestPhantomTaskRefusal:
     """#3255: a task name the dataset does not contain must be refused at
     submit, not dispatched as a container that can only exit 1.

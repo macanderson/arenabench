@@ -142,7 +142,9 @@ GRADES: dict[str, str] = {
     "flip": "an independently authored witness test failed, then passed",
     "oracle": "a tracked test command flipped fail→pass",
     "refuted": "the oracle ran and never passed — the claim was caught",
-    "unsatisfiable": "the witness failed the same way before and after — it never discriminated",
+    "unsatisfiable": (
+        "the witness failed the same way before and after — it never discriminated"
+    ),
     "unproven": "proof was warranted and no witness could be authored",
     "waived": "verification was waived; nothing checked the work",
     "unwarranted": "no proof was demanded of this change",

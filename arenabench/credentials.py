@@ -138,7 +138,7 @@ def apply_ambient_credentials(
         return replace(contestant, env={**fallback, **contestant.env})
 
     contestants = tuple(seeded(c) for c in spec.contestants)
-    if all(new is old for new, old in zip(contestants, spec.contestants)):
+    if all(new is old for new, old in zip(contestants, spec.contestants, strict=True)):
         return spec
     return replace(spec, contestants=contestants)
 

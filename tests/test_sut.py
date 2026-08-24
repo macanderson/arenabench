@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -729,7 +730,7 @@ class TestProvenanceRecordsTheSut:
 class TestProvenanceRecordsEverySeat:
     """One match may race two Stella builds; the record must carry both (#2082)."""
 
-    SEATS = {
+    SEATS: ClassVar[dict[str, dict[str, str]]] = {
         "champ": {"name": "champion", "ref": "a" * 40, "commit": "a" * 40, "sha256": "x"},
         "chall": {"name": "challenger", "ref": "b" * 40, "commit": "b" * 40, "sha256": "y"},
     }

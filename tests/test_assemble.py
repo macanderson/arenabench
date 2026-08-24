@@ -381,7 +381,7 @@ def test_a_missing_whole_match_spec_refuses_rather_than_guesses(
     """
     run_dir = fetched_run(tmp_path)
     (run_dir / "match.toml").unlink()
-    with pytest.raises(AssembleError, match="match.toml"):
+    with pytest.raises(AssembleError, match=r"match\.toml"):
         assemble_run(run_dir)
 
 

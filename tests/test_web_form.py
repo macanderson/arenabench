@@ -98,9 +98,10 @@ def _engine_literal_keys(source: str, *, within: str) -> set[str]:
     for line in source[start:].splitlines():
         depth += line.count("{") - line.count("}")
         # `name: value,` and the shorthand `name,` — both are keys on the wire.
-        if match := re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:,]", line):
-            if match.group(1) != "engine":
-                keys.add(match.group(1))
+        if (
+            match := re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:,]", line)
+        ) and match.group(1) != "engine":
+            keys.add(match.group(1))
         if depth == 0:
             break
     assert keys, (

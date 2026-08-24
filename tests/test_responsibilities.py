@@ -27,7 +27,6 @@ from arenabench.config import MatchTemplateError, dump_match, match_from_toml
 from arenabench.harbor_agent import arena_posture
 from arenabench.model import (
     RESPONSIBILITY_AGENTS,
-    ROLES,
     Engine,
     MatchSpec,
     ResponsibilityConfig,

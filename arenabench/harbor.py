@@ -496,7 +496,8 @@ def provision(minimum: str, *, timeout: float = PROVISION_TIMEOUT) -> str:
 
 
 def _provision_allowed() -> bool:
-    return os.environ.get(NO_PROVISION_ENV, "").strip().lower() not in ("1", "true", "yes", "on")
+    flag = os.environ.get(NO_PROVISION_ENV, "").strip().lower()
+    return flag not in ("1", "true", "yes", "on")
 
 
 def resolve_for_dataset(
@@ -583,7 +584,9 @@ def resolve_for_dataset(
             _too_old(dataset_title, minimum, _summarise(tried))
             + f" Installing one automatically also failed: {exc}"
         ) from exc
-    return Resolution(binary, harbor_version(binary), f"installed by arenabench for {dataset_title}")
+    return Resolution(
+        binary, harbor_version(binary), f"installed by arenabench for {dataset_title}"
+    )
 
 
 def _summarise(tried: list[str]) -> str:

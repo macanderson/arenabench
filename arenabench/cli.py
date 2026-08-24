@@ -349,7 +349,7 @@ def _cmd_contest(args: argparse.Namespace) -> int:
     # while trials are queueing, and a run id printed only on completion is a
     # run nobody watched.
     if args.run_id:
-        print(f"\nwatch the scoreboard while it runs:")
+        print("\nwatch the scoreboard while it runs:")
         print(f"  arenabench cloud watch {args.run_id}")
     else:
         print("\nwatch the scoreboard with `arenabench cloud watch <run-id>` "
@@ -963,7 +963,9 @@ def _cmd_proof(args: argparse.Namespace) -> int:
         if proof.tracked_command:
             print(f"   command   {proof.tracked_command}")
         for role in proof.roles:
-            print(f"   {role.role:<16} {role.model}  ×{role.calls}")
+            # The multiplication sign is the deliberate spelling of a call
+            # count in this report, not a lookalike typo.
+            print(f"   {role.role:<16} {role.model}  ×{role.calls}")  # noqa: RUF001
         for label, text in reasons:
             print(f"   {label}: {text}")
         if args.full and proof.verdict_summary:

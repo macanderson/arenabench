@@ -17,7 +17,7 @@ classes they were recorded under.
 
 from __future__ import annotations
 
-from arenabench.toolclass import classify, class_label
+from arenabench.toolclass import class_label, classify
 
 
 class TestEachFamilyLandsInItsOwnClass:

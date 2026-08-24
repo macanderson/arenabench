@@ -31,7 +31,7 @@ follow shows up as a red test rather than a silent drift.
 
 from __future__ import annotations
 
-__all__ = ["CLASSES", "classify", "class_label"]
+__all__ = ["CLASSES", "class_label", "classify"]
 
 #: `(read_only, group)` per dispatch name — copied verbatim from the
 #: `catalog!` table in `crates/stella-tools/src/catalog.rs` as of 2026-08.

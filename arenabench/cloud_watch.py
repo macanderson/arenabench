@@ -34,16 +34,17 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 __all__ = [
     "Cell",
     "Scoreboard",
     "assemble",
     "cell_for",
-    "reward_of",
     "render_html",
+    "reward_of",
     "void_reason",
 ]
 
@@ -173,7 +174,7 @@ class Scoreboard:
     def totals(self) -> dict[str, float]:
         """Summed reward per contestant, over scored cells only."""
         out = {contestant: 0.0 for contestant in self.contestants}
-        for (task, contestant), cell in self.cells.items():
+        for (_task, contestant), cell in self.cells.items():
             if cell.reward is not None and contestant in out:
                 out[contestant] += cell.reward
         return out
@@ -283,7 +284,7 @@ class CloudScoreboard:
         try:
             for row in self.executor.run_rows(self.run_id):
                 details[row.get("job", "")] = row.get("detail", "")
-        except Exception:  # noqa: BLE001 - a missing detail is cosmetic
+        except Exception:  # a missing detail is cosmetic
             pass
         results: dict[str, Any] = {}
         for job in jobs:
@@ -306,10 +307,10 @@ class CloudScoreboard:
         the label here returns a key nothing writes, and the ``except`` below
         reports that as "not finished yet" for the life of the run.
         """
-        s3 = self.executor._client("s3")  # noqa: SLF001 - same package
+        s3 = self.executor._client("s3")  # same package
         key = f"runs/{self.run_id}/{job_id}/results.json"
         try:
             body = s3.get_object(Bucket=self.executor.bucket(), Key=key)
             return json.loads(body["Body"].read())
-        except Exception:  # noqa: BLE001 - NoSuchKey and friends are "not yet"
+        except Exception:  # NoSuchKey and friends are "not yet"
             return None

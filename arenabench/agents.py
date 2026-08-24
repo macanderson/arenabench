@@ -401,14 +401,13 @@ def dead_seat_reason(contestant: Contestant) -> str | None:
         return None
     if any(contestant.env.get(name) for name in own):
         return None
-    if routes_directly(contestant):
-        # `_routing_environment` aliases the provider key into the agent's
-        # own variable when a base URL names where it is valid.
-        if any(
-            contestant.env.get(name)
-            for name in credential_env_for(contestant.engine.api)
-        ):
-            return None
+    # `_routing_environment` aliases the provider key into the agent's
+    # own variable when a base URL names where it is valid.
+    if routes_directly(contestant) and any(
+        contestant.env.get(name)
+        for name in credential_env_for(contestant.engine.api)
+    ):
+        return None
     names = ", ".join(own)
     return (
         f"{spec.title} reads credentials only from {names}; none is set, and "

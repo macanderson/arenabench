@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -82,7 +83,7 @@ class TestVerifierIndependence:
 
     #: Models strong enough to sit in judgement. A judge outside this set is
     #: cheaper, and cheapness in a verifier buys false approvals.
-    FRONTIER_JUDGES = {"claude-opus-5", "claude-fable-5"}
+    FRONTIER_JUDGES: ClassVar[set[str]] = {"claude-opus-5", "claude-fable-5"}
 
     def test_no_preset_verifies_a_worker_with_itself(self):
         for preset in preset_listing():
@@ -316,7 +317,7 @@ class TestPerDatasetHarbor:
     ):
         """Checking a *different* Harbor's version proves nothing about this run."""
         monkeypatch.setattr(harbor, "harbor_version", lambda binary=None: "0.6.1")
-        with pytest.raises(harbor.HarborTooOldError, match="0.20.0"):
+        with pytest.raises(harbor.HarborTooOldError, match=r"0\.20\.0"):
             harbor.require_for_dataset("0.20.0", "Frontier Bench", binary="/lane/harbor")
 
     def test_frontier_bench_declares_the_floor_that_makes_it_gradeable(self):

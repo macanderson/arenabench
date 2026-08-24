@@ -696,7 +696,9 @@ def dump_match(spec: MatchSpec, env_by_seat: dict[str, list[str]] | None = None)
             # stage, and `arenabench run it.toml` would then run a different
             # experiment than the one whose number was published.
             out.append("")
-            out.append("  # Stage roster. Absent means the shipped binding, which is not `false`.")
+            out.append(
+                "  # Stage roster. Absent means the shipped binding, which is not `false`."
+            )
             for name, row in engine.responsibilities.items():
                 out.append(f"    [contestant.engine.responsibilities.{name}]")
                 for key, value in row.to_json().items():

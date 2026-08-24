@@ -42,11 +42,11 @@ caller supplied, so a loopback HTTP client cannot smuggle an option into
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
 import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -463,10 +463,8 @@ def list_branches(repo: Path | None = None, *, fetch: bool = False) -> list[Bran
     if fetch:
         # Best-effort: a rig offline mid-session should still list what it has
         # rather than fail the whole picker.
-        try:
+        with contextlib.suppress(SutUnavailableError):
             _git(repo, "fetch", "--quiet", "--prune", "origin", timeout=120.0)
-        except SutUnavailableError:
-            pass
 
     default = ""
     try:

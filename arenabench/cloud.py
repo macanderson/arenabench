@@ -82,7 +82,7 @@ from typing import Any
 from . import balance, preflight
 from .model import MatchSpec, slugify
 from .registry import DEFAULT_REGISTRY
-from .sut import is_full_sha, is_safe_ref
+from .sut import is_full_sha
 
 __all__ = [
     "BURST_QUEUE",
@@ -636,7 +636,6 @@ def _dataset_task_names(dataset: str) -> list[str]:
     not an error, and deliberately never a download: :meth:`Registry.fetch`
     is never called implicitly.
     """
-    from .registry import DEFAULT_REGISTRY
 
     return [task.name for task in DEFAULT_REGISTRY.tasks(dataset)]
 
@@ -722,7 +721,6 @@ def _cmd_cloud_run(
     # task list still means "the whole dataset", and a dataset not on this
     # disk is a validation *gap*, said out loud rather than silently waved
     # through.
-    from .registry import DEFAULT_REGISTRY
 
     if spec.tasks:
         known = {task.name for task in DEFAULT_REGISTRY.tasks(spec.dataset)}
@@ -989,12 +987,12 @@ def _cmd_cloud_watch(args: Any, executor: CloudExecutor | None = None) -> int:
     board = CloudScoreboard(executor, args.run_id)
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 - stdlib's spelling
+        def do_GET(self) -> None:  # stdlib's spelling
             try:
                 page = render_html(board.fetch(), refresh_seconds=args.refresh)
                 status = 200
-            except Exception as exc:  # noqa: BLE001 - a transient AWS error
-                # must not kill the watcher; the next refresh retries.
+            except Exception as exc:
+                # A transient AWS error must not kill the watcher; the next refresh retries.
                 page = (
                     "<!doctype html><meta charset='utf-8'>"
                     f"<meta http-equiv='refresh' content='{args.refresh}'>"

@@ -34,8 +34,9 @@ every archive predating the record — is read exactly as before.
 
 :class:`MetricsReader` sits on top, reducing a trial to the scoreboard's
 dimensions and re-parsing a file only when its size changes, so an idle
-dashboard costs ``stat()`` calls. Its counterpart :class:`~arenabench.transcript.TranscriptReader`
-reads the same artifacts for a human rather than for a scoreboard, and lives in
+dashboard costs ``stat()`` calls. Its counterpart
+:class:`~arenabench.transcript.TranscriptReader` reads the same artifacts for a
+human rather than for a scoreboard, and lives in
 :mod:`arenabench.transcript` — it shares no name with this module, so the two
 were only ever one file by habit (#2397).
 
@@ -48,7 +49,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from stat import S_ISDIR

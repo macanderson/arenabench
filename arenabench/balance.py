@@ -204,12 +204,13 @@ def fetch_openrouter_balance(api_key: str, timeout: float = 10.0) -> Balance | N
     unexpected body shape. This function decides nothing; :func:`verdict`
     turns "cannot tell" into a report rather than a refusal.
     """
-    request = urllib.request.Request(  # noqa: S310 - fixed https URL, not user input
+    # A fixed https URL, not user input.
+    request = urllib.request.Request(
         "https://openrouter.ai/api/v1/credits",
         headers={"Authorization": f"Bearer {api_key}"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, ValueError, OSError):
         return None
