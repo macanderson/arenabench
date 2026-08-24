@@ -119,6 +119,69 @@ works end to end for $0.
 
 ---
 
+## `make` — the short names
+
+`make help` lists every target. Two of them matter most.
+
+### Money
+
+The substrate scales to zero, which is exactly what makes a stuck job
+expensive: nothing looks wrong. A wedged trial holds a whole `m6i.xlarge`
+until the job definition's three-hour timeout fires, and nobody gets a
+notification.
+
+```bash
+make aws-scan      # read-only: what is running, and what it costs per hour
+make aws-pause     # stop it — DRY RUN unless APPLY=1
+make aws-pause APPLY=1
+make aws-pause-all APPLY=1   # ...also non-Batch EC2, and disable the queues
+```
+
+`aws-scan` covers Batch (queued states too — a `RUNNABLE` job is a bill that
+has not started, and the cheapest possible moment to cancel it), non-Batch
+EC2, in-flight CodeBuild, and the quiet hourly billers: NAT gateways,
+unattached elastic IPs, load balancers. Storage is reported separately, per
+month, because nobody pauses a bucket.
+
+`aws-pause` never touches Batch-managed instances. Terminating one out from
+under the scheduler is not a pause — Batch replaces it and the bill carries
+on. Ending the **jobs** is the pause; the instances drain on their own.
+
+### Matches
+
+Both starters seat **Stella as arm 1 and Claude Code as arm 2**, both on
+`claude-sonnet-5` at `effort = low`. One model and one effort across both
+seats, so the thing under comparison is the agent architecture rather than a
+seat's budget.
+
+```bash
+export ANTHROPIC_API_KEY=...          # Stella's key
+export CLAUDE_CODE_OAUTH_TOKEN=...    # Claude Code's subscription token
+
+make h2h TASKS=10                     # sampled from the whole dataset
+make frontierbench TASKS=10           # easy + medium only
+make frontierbench TASKS=20 ARGS=--include-hard
+make match-preview TASKS=6            # write the toml and stop
+```
+
+`frontierbench` excludes hard tasks **by default**, and says so on the console
+and in the generated match file. That is a smaller and easier population than
+the benchmark, so a solve rate from it is not comparable to a full-panel
+number and must not be quoted as one. `--include-hard` widens the pool.
+
+Draws are seeded and the seed is printed; `SEED=` reproduces a slice exactly.
+
+Credentials never enter a match file, and never a `make` variable — make
+echoes its recipes, and a variable lands in `ps` and shell history like any
+flag. Both arms declare only the *name* of the variable they need; a cloud
+submit stages the values into `/arenabench/*` SSM SecureStrings, passing them
+to the AWS CLI through a mode-0600 file rather than argv. The
+`--anthropic-key` / `--oauth-token` flags exist for convenience and warn
+about exactly this when used; `--anthropic-key-file` and the environment
+variables avoid it.
+
+---
+
 ## `arenabench.toml` — a match as a document
 
 A match is otherwise something you assemble in a browser and lose. The TOML
