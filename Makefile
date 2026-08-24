@@ -35,7 +35,10 @@ QUICK_FLAGS := --tasks $(TASKS) $(if $(SEED),--seed $(SEED),) $(ARGS)
 .PHONY: help
 help: ## List every target
 	@printf '\033[1mArenaBench\033[0m\n\n'
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@# The digit in the character class is not cosmetic: without it `h2h`
+	@# — the target this file exists for — is silently absent from `make
+	@# help`, which is the one place a person goes to find it.
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | sort \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@printf '\n  \033[2mVariables: TASKS=%s SEED= APPLY=1 REGION=%s ARGS="--dry-run"\033[0m\n' \
