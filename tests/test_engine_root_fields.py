@@ -12,6 +12,17 @@ lies about what would happen at the seam). ``bench/harbor_adapter`` solved
 this the same way already — parse the Rust source rather than duplicate it
 (``tests/test_posture.py::_engine_root_fields``, #2033) — and this file is
 that same reader, pointed at arenabench's own copy.
+
+The authority is now in **another repository**
+(https://github.com/macanderson/stella), so this file resolves a Stella
+checkout the way the package itself does — :func:`arenabench.sut.stella_repo`,
+which honours ``ARENABENCH_STELLA_REPO`` and falls back to the adapter path a
+Stella seat already needs — and **skips** when there is none. That is the
+honest posture for a cross-repo parity check: it cannot run in a bare CI
+checkout, and a vendored copy of the Rust file would be a third hand-copy of
+the very thing this test exists to catch drifting. It runs on any machine
+that can seat Stella at all, which is every machine that can run the match
+this vocabulary governs.
 """
 
 from __future__ import annotations
@@ -19,17 +30,39 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from arenabench.harbor_agent import _ENGINE_ROOT_FIELDS
+from arenabench.sut import repo_problem, stella_repo
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_UNKNOWN_RS = _REPO_ROOT / "crates" / "stella-cli" / "src" / "settings" / "unknown.rs"
+_UNKNOWN_REL = Path("crates") / "stella-cli" / "src" / "settings" / "unknown.rs"
 
 
-def _parse_rust_str_slice(source: str, const_name: str) -> frozenset[str]:
+def _unknown_rs() -> Path:
+    """The launcher vocabulary's source file, or skip saying why not."""
+    repo = stella_repo()
+    if repo is None:
+        pytest.skip(
+            f"no Stella checkout to read {_UNKNOWN_REL} from: "
+            f"{repo_problem()} This parity check reads the authority in "
+            "https://github.com/macanderson/stella; set "
+            "ARENABENCH_STELLA_REPO to a checkout to run it."
+        )
+    path = repo / _UNKNOWN_REL
+    if not path.is_file():
+        pytest.skip(
+            f"{path} does not exist — the Stella checkout at {repo} predates "
+            "or postdates the module this check reads. If the crate moved, "
+            "update `_UNKNOWN_REL`."
+        )
+    return path
+
+
+def _parse_rust_str_slice(source: str, const_name: str, path: Path) -> frozenset[str]:
     """Every string literal in a ``const NAME: &[&str] = &[ ... ];`` table."""
     match = re.search(rf"const {const_name}: &\[&str\] =\s*&\[(.*?)\];", source, re.DOTALL)
     assert match is not None, (
-        f"could not find `{const_name}` in {_UNKNOWN_RS} — the constant moved "
+        f"could not find `{const_name}` in {path} — the constant moved "
         "or was renamed; this file's readers must be repointed"
     )
     return frozenset(re.findall(r'"([^"]+)"', match.group(1)))
@@ -45,17 +78,17 @@ def _engine_root_fields() -> frozenset[str]:
     the seam, and an assertion that only checked the first table would be
     false about the code it names.
     """
+    path = _unknown_rs()
     try:
-        source = _UNKNOWN_RS.read_text(encoding="utf-8")
+        source = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise AssertionError(
-            f"cannot read the launcher vocabulary at {_UNKNOWN_RS}: "
-            f"{exc.strerror}. That path is a literal in this file, not a "
-            "resolved crate location — if the crate moved, update `_UNKNOWN_RS`."
+            f"cannot read the launcher vocabulary at {path}: {exc.strerror}. "
+            "The Stella checkout was found but this file could not be read."
         ) from exc
-    fields = _parse_rust_str_slice(source, "ENGINE_ROOT_FIELDS")
+    fields = _parse_rust_str_slice(source, "ENGINE_ROOT_FIELDS", path)
     assert fields, "ENGINE_ROOT_FIELDS parsed to zero entries"
-    retired = _parse_rust_str_slice(source, "RETIRED_ENGINE_ROOT")
+    retired = _parse_rust_str_slice(source, "RETIRED_ENGINE_ROOT", path)
     return fields | retired
 
 

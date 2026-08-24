@@ -32,6 +32,19 @@ Parameters:
     Description: >-
       Route 53 hosted zone for DomainName. Certificate validation records
       and the alias records are written here.
+  BindDomain:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Whether to bind DomainName (and www) to the API. Defaults to "false"
+      because ACM's DNS validation resolves the validation record over
+      PUBLIC DNS: until the registrar delegates DomainName to
+      HostedZoneId's nameservers, a certificate request hangs in
+      PENDING_VALIDATION and takes the whole stack with it. So the app
+      ships first on the API's own endpoint, and flipping this to "true"
+      after delegation is what binds the domain — one parameter, no
+      redesign, and a stack that is never blocked on a registrar.
   AllowedEmails:
     Type: String
     Default: macanderson.mail@gmail.com
@@ -79,10 +92,12 @@ Parameters:
 Conditions:
   DeriveBucket: !Equals [!Ref ArtifactsBucket, ""]
   DeriveCodeBucket: !Equals [!Ref CodeS3Bucket, ""]
+  Bind: !Equals [!Ref BindDomain, "true"]
 
 Resources:
   Certificate:
     Type: AWS::CertificateManager::Certificate
+    Condition: Bind
     Properties:
       DomainName: !Ref DomainName
       SubjectAlternativeNames:
@@ -240,6 +255,7 @@ Resources:
 
   ApexDomain:
     Type: AWS::ApiGatewayV2::DomainName
+    Condition: Bind
     Properties:
       DomainName: !Ref DomainName
       DomainNameConfigurations:
@@ -249,6 +265,7 @@ Resources:
 
   WwwDomain:
     Type: AWS::ApiGatewayV2::DomainName
+    Condition: Bind
     Properties:
       DomainName: !Sub "www.${DomainName}"
       DomainNameConfigurations:
@@ -258,6 +275,7 @@ Resources:
 
   ApexMapping:
     Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: Bind
     Properties:
       ApiId: !Ref HttpApi
       DomainName: !Ref ApexDomain
@@ -265,6 +283,7 @@ Resources:
 
   WwwMapping:
     Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: Bind
     Properties:
       ApiId: !Ref HttpApi
       DomainName: !Ref WwwDomain
@@ -272,6 +291,7 @@ Resources:
 
   ApexAlias:
     Type: AWS::Route53::RecordSetGroup
+    Condition: Bind
     Properties:
       HostedZoneId: !Ref HostedZoneId
       RecordSets:
@@ -298,7 +318,15 @@ Resources:
 
 Outputs:
   ApiEndpoint:
-    Description: The API's default endpoint (works before DNS delegates).
+    Description: >-
+      The API's own endpoint. The live URL until BindDomain is "true", and
+      the way in if a DNS change ever breaks the custom domain.
     Value: !GetAtt HttpApi.ApiEndpoint
+  BoundDomain:
+    Description: The custom domain, or the reason there is not one yet.
+    Value: !If
+      - Bind
+      - !Sub "https://${DomainName}"
+      - "unbound — set BindDomain=true once the registrar delegates to this zone"
   WebFunctionArn:
     Value: !GetAtt WebFunction.Arn
