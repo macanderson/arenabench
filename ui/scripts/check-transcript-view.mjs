@@ -73,7 +73,7 @@ const entry = (seq, kind, extra = {}) => ({
 // The wire carries the task instruction as a `block_registered` event that
 // lands AFTER the trial's first stage rule, so arrival order buries the
 // question under a row of the answer. The reader stamps it with the reserved
-// seq 0 (`arenabench/arenabench/transcript.py`), and this is the other half of
+// seq 0 (`arenabench/transcript.py`), and this is the other half of
 // that contract: the reading order is `seq` order, so the entry list begins
 // with the prompt row.
 console.log("prompt ordering");

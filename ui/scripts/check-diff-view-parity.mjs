@@ -9,12 +9,16 @@
  * the deck and the Observatory when someone is arguing about what a run did,
  * which is exactly when one edit must not look like two.
  *
- * The two halves cannot share a test runner, so they share a **file**:
+ * The two halves cannot share a test runner — or, since the ejection, a
+ * repository — so they share a **file**. The Rust source of truth lives in
+ * https://github.com/macanderson/stella:
  * `crates/stella-diff/tests/fixtures/view-plan-matrix.txt`, generated from the
- * Rust and pinned there by `tests/view_plan_matrix.rs`. This script runs the
- * TypeScript over the same matrix and asserts it reproduces that file exactly.
- * So a Rust change to the policy must re-bless the golden, and a re-blessed
- * golden fails here until the port catches up.
+ * Rust and pinned there by `tests/view_plan_matrix.rs`. A vendored copy is
+ * committed here as `ui/golden/view-plan-matrix.txt`, and this script runs the
+ * TypeScript over that matrix and asserts it reproduces the file exactly. So a
+ * Rust change to the policy must re-bless the golden there, and the re-blessed
+ * matrix must be synced here by copying it over the vendored file — which
+ * fails this check until the port catches up.
  *
  *   node scripts/check-diff-view-parity.mjs
  *
@@ -35,7 +39,7 @@ import { dirname, resolve } from "node:path";
 import { selectDiffLines } from "../lib/diff-view.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const GOLDEN = resolve(here, "../../../crates/stella-diff/tests/fixtures/view-plan-matrix.txt");
+const GOLDEN = resolve(here, "../golden/view-plan-matrix.txt");
 
 /** Mirrors `MATRIX` in `crates/stella-diff/tests/view_plan_matrix.rs`. */
 const MATRIX = [
@@ -98,7 +102,9 @@ try {
   golden = readFileSync(GOLDEN, "utf8");
 } catch (err) {
   console.error(`diff-view-parity: cannot read ${GOLDEN}\n  ${err.message}`);
-  console.error("Generate it with: BLESS=1 cargo test -p stella-diff --test view_plan_matrix");
+  console.error("Re-vendor it from the stella repo (github.com/macanderson/stella):");
+  console.error("  BLESS=1 cargo test -p stella-diff --test view_plan_matrix");
+  console.error("  cp crates/stella-diff/tests/fixtures/view-plan-matrix.txt <here>/ui/golden/");
   process.exit(2);
 }
 
@@ -124,6 +130,7 @@ if (at !== -1) {
 console.error("");
 console.error("Fix whichever side is wrong — the Rust is not automatically the");
 console.error("right one. Port to lib/diff-view.ts, or change");
-console.error("crates/stella-diff/src/view.rs and re-bless the golden with:");
+console.error("crates/stella-diff/src/view.rs in github.com/macanderson/stella,");
+console.error("re-bless the golden there, and copy it over ui/golden/:");
 console.error("  BLESS=1 cargo test -p stella-diff --test view_plan_matrix");
 process.exit(1);

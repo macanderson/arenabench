@@ -11,7 +11,10 @@ build/
 # `npm run build` and never tracked. Build it before packaging; pyproject's
 # hatch `artifacts` entry ships it in the wheel despite this ignore.
 arenabench/web/
-ui/node_modules/
+# No trailing slash: the pattern must also catch a stray symlink at this
+# path, which a dir-only pattern lets into the index (one shipped with the
+# ejection, pointing at an absolute monorepo path).
+ui/node_modules
 ui/.next/
 ui/out/
 ui/next-env.d.ts
