@@ -1,0 +1,35 @@
+# arenabench match — the acceptance run for the ejection (#2380).
+#
+#   cloud:  arenabench cloud run matches/ejection-acceptance.toml --no-gate
+#
+# One seat, one task, one attempt. This match is not a measurement and must
+# never be quoted as one: it exists to prove that the ejected repository can
+# still run a real cloud match end to end — CodeBuild cloning
+# macanderson/arenabench with PkgPath=".", the runner image fetching Stella's
+# harbor adapter from the Stella repository at build time, credentials coming
+# from SSM rather than a laptop, and a trial landing in S3 under the run id.
+#
+# `regex-log` is the task because the recorded bar scored 5/5 on it: a failure
+# here is far more likely to be the plumbing this run is testing than the
+# agent, which is exactly what an acceptance run wants.
+[match]
+name = "ejection acceptance: one task, one seat"
+dataset = "terminal-bench-2.1"
+tasks = ["regex-log"]
+attempts = 1
+concurrency = 1
+
+[[contestant]]
+id = "stella"
+name = "Stella (Sonnet 5)"
+agent = "stella"
+color = "#EFC53F"
+
+  [contestant.engine]
+  api = "openrouter"
+  model = "anthropic/claude-sonnet-5"
+  reasoning = true
+
+  [contestant.env]
+  # Names only — never values. Resolved from SSM /arenabench/* in the cloud.
+  required = ["OPENROUTER_API_KEY"]
