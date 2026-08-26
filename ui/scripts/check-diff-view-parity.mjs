@@ -77,8 +77,10 @@ function render() {
     "# stella_diff::view::plan over a fixed matrix.",
     "# Generated — re-bless with:",
     "#   BLESS=1 cargo test -p stella-diff --test view_plan_matrix",
-    "# The TypeScript port must reproduce this byte for byte:",
-    "#   node arenabench/ui/scripts/check-diff-view-parity.mjs",
+    "# The TypeScript port must reproduce this byte for byte. It lives in",
+    "# github.com/macanderson/arenabench, which vendors this file as",
+    "# `ui/golden/view-plan-matrix.txt`; from that repo's `ui/`:",
+    "#   node scripts/check-diff-view-parity.mjs",
     "# `fold` is the index the elision marker precedes, or `-` for none.",
   ];
   for (const [total, step] of MATRIX) {
