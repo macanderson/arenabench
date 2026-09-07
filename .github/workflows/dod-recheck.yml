@@ -37,3 +37,5 @@ permissions:
 jobs:
   recheck:
     uses: macanderson/oxagen/.github/workflows/dod-recheck.yml@2dd72c9957f8520ee673862de894ed64f4b2380c # oxagen main, #2638
+
+# Verifying oxagen#2664 item 3: a draft marked ready produces a dod run.
