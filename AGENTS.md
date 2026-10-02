@@ -22,24 +22,23 @@ Mac set this on 2026-09-26 for every repository. The `agent-monitored-pr` label 
 
 ## Standing decisions — apply without asking
 
-Each directive below is a Steering Context Record in [`docs/scr/`](docs/scr/);
-the SCR is canonical — it carries the rationale, exceptions, and enforcement
-status. This block is the compiled summary that every agent — Claude Code
-(via CLAUDE.md's `@AGENTS.md` import) and Stella (which reads AGENTS.md
-directly) — loads at session start. The corpus is identical across the
-macanderson org repos.
+These directives are standing decisions held as context records in the Oxagen
+workspace this repository is linked to. This block is the compiled summary that
+every agent loads at session start: Claude Code through CLAUDE.md's `@AGENTS.md`
+import, and Stella by reading AGENTS.md directly. The repository keeps no copy of
+the records. Oxagen [ADR-137](https://github.com/oxageninc/product/blob/main/docs/adr/ADR-137-standing-decisions-are-workspace-context-records.md) retired `docs/scr/` in every repository.
 
-- **[SCR-001](docs/scr/SCR-001-no-full-suite-builds.md) — Tests/builds
+- **SCR-001 — Tests/builds
   (inner loop):** Never compile or run the full test suite while developing.
   Build and test only the crates/packages/modules touched by the change
   (plus direct dependents on interface changes). The full suite is CI's job.
   Here: `uv run pytest tests/test_x.py -q`, never bare `pytest` or `make test`.
-- **[SCR-002](docs/scr/SCR-002-durability-first-architecture.md) —
+- **SCR-002 —
   Architecture decisions:** Do not ask. Choose the most durable option — the
   one that can't be questioned in 10 years as the right move. Cheap-and-easy
   only wins when it is also the excellent durable choice. Record every such
   decision as an ADR in `docs/adr/`; the ADR replaces the question.
-- **[SCR-003](docs/scr/SCR-003-dod-verified-close.md) — Definition of
+- **SCR-003 — Definition of
   done:** An issue closes only when every DoD checklist item is satisfied
   and verified. Reference-grade includes tests, code comments, docs, and
   CI — not just the implementation. A PR that advances an issue without
@@ -49,18 +48,18 @@ macanderson org repos.
   PR that closes nothing is waived by a label, and which one is a claim:
   `no-issue` for a trivial change, `closes-nothing` for a substantial one
   that closes no issue by design.
-- **[SCR-004](docs/scr/SCR-004-residue-becomes-issues.md) — Fix over
+- **SCR-004 — Fix over
   file:** Fix what you notice in the PR you are making; two unrelated fixes
   in one PR is fine. File an issue only when a fix cannot responsibly ride
   the PR (a maintainer decision, a rig or spend, or work larger than the
   session), and only when fixing it moves stability, reliability,
   maintainability, innovation, efficiency, or performance. Apply ONLY the
   `triage` label.
-- **[SCR-005](docs/scr/SCR-005-triage-separation-of-duties.md) — Triage
+- **SCR-005 — Triage
   separation of duties:** Never apply priority (`P0`–`P3`) or size labels —
   a dedicated triage agent owns sizing and priority; a guard workflow
   strips creator-applied priorities.
-- **[SCR-006](docs/scr/SCR-006-schema-changes-are-labelled.md) — Schema
+- **SCR-006 — Schema
   changes and migrations:** A pull request that changes a schema carries
   `migration-required`, and the migration reaches production before or with
   the deploy of that change, never after. Say in the PR which store changed
