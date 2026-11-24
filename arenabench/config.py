@@ -408,13 +408,16 @@ def match_from_toml(data: dict[str, Any], *, match_id: str | None = None) -> Mat
     if match_lineage is not None and not isinstance(match_lineage, str):
         problems.append("match.lineage must be a string lineage id")
         match_lineage = None
-    elif isinstance(match_lineage, str) and match_lineage.strip():
-        if _LINEAGE_RE.fullmatch(match_lineage.strip()) is None:
-            problems.append(
-                "match.lineage must be 1-64 characters of [A-Za-z0-9._-] "
-                "starting alphanumeric, optionally followed by @<generation>"
-            )
-            match_lineage = None
+    elif (
+        isinstance(match_lineage, str)
+        and match_lineage.strip()
+        and _LINEAGE_RE.fullmatch(match_lineage.strip()) is None
+    ):
+        problems.append(
+            "match.lineage must be 1-64 characters of [A-Za-z0-9._-] "
+            "starting alphanumeric, optionally followed by @<generation>"
+        )
+        match_lineage = None
 
     if problems:
         raise MatchTemplateError(problems)
